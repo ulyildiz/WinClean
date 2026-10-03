@@ -36,7 +36,12 @@ function Invoke-WinClean {
         "extendDefaults": false at the top level to use only the user file's targets.
 
     .PARAMETER IncludeDev
-        Also clean developer data. With -DevRoot this includes build output folders
+        Also clean developer data: npm (between two 'npm cache verify' runs), pip,
+        cargo registry downloads, NuGet HTTP cache and vcpkg archive caches; VS Code
+        caches and workspace storage of workspaces that no longer exist. Tool cache
+        overrides (npm_config_cache, PIP_CACHE_DIR, CARGO_HOME, NUGET_HTTP_CACHE_PATH,
+        VCPKG_DEFAULT_BINARY_CACHE, VCPKG_ROOT) are honoured.
+        With -DevRoot this also includes build output folders
         (bin/obj next to a .NET project, CMake build/CMakeFiles, Cargo target, git-ignored
         npm build), each only when its contents prove it is tool output, it holds no
         git-tracked files, and nothing in it was written within -DevAgeHours.
@@ -179,6 +184,13 @@ function Invoke-WinClean {
     }
 
     if ($IncludeDev) {
+        Write-Host ''
+        Write-Host 'Developer caches (close editors / package managers first for best results)' -ForegroundColor Cyan
+        foreach ($r in (Invoke-DevCacheCleanup -Target @(Get-DevCacheTargets) -AgeHours $DevAgeHours -DryRun:$DryRun)) {
+            $results.Add($r)
+            Write-TargetResult -Result $r
+        }
+
         Write-Host ''
         Write-Host 'Build artifacts' -ForegroundColor Cyan
         if ($DevRoot) {
