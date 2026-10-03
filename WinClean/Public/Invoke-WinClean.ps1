@@ -89,14 +89,6 @@ function Invoke-WinClean {
         Quarantine runs older than this many days are deleted permanently at the start
         of every run (dry runs only report them). Default: 7
 
-    .PARAMETER CreateRestorePoint
-        Create a System Restore point (Checkpoint-Computer) before anything is deleted.
-        If System Restore is disabled, Windows refuses because one was made in the last
-        24 hours, the session is not elevated, or Checkpoint-Computer is unavailable
-        (PowerShell 7), a warning is shown and the cleanup continues. Note that a
-        restore point captures system files and the registry, not temp or personal
-        files - use -Quarantine to be able to bring deleted files back.
-
     .PARAMETER PassThru
         Return a WinClean.RunResult object with per-target details.
 
@@ -158,8 +150,6 @@ function Invoke-WinClean {
         [ValidateRange(0, 3650)]
         [int]$QuarantineDays = 7,
 
-        [switch]$CreateRestorePoint,
-
         [switch]$PassThru
     )
 
@@ -173,7 +163,6 @@ function Invoke-WinClean {
     $ram = $null
     $wsl = $null
     $quarantineRun = $null
-    $restorePoint = $null
 
     Write-Host ''
     if ($DryRun) { Write-Host '=== Windows cleanup (DRY RUN - nothing will be deleted) ===' -ForegroundColor Yellow }
@@ -182,15 +171,6 @@ function Invoke-WinClean {
 
     if ($limited) {
         Write-Warning 'Not running as administrator: Windows temp, error reports, the Update cache and the RAM flush will be skipped. Run from an elevated PowerShell for a full clean.'
-    }
-
-    # first, before anything is deleted - the quarantine purge below included
-    if ($CreateRestorePoint) {
-        Write-Host ''
-        Write-Host 'System Restore' -ForegroundColor Cyan
-        $restorePoint = New-WinCleanRestorePoint -DryRun:$DryRun -IsAdmin $isAdmin
-        if ($restorePoint.Created) { Write-Host ("  Restore point created: {0}" -f $restorePoint.Description) }
-        else { Write-Host ("  No restore point ({0})" -f $restorePoint.Reason) -ForegroundColor Yellow }
     }
 
     # expired quarantine runs are purged on every run, before a new one is started
@@ -377,7 +357,6 @@ function Invoke-WinClean {
             BytesQuarantined = $quarantinedBytes
             FilesQuarantined = $quarantinedFiles
             Targets          = $results.ToArray()
-            RestorePoint     = $restorePoint
             Ram              = $ram
             Wsl              = $wsl
         }

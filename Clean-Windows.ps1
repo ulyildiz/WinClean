@@ -20,7 +20,6 @@
 .PARAMETER ConfirmDockerPrune  Remove dangling Docker images (never --all).
 .PARAMETER Quarantine        Move files to %TEMP%\WinClean-Quarantine instead of deleting them.
 .PARAMETER QuarantineDays    Delete quarantine runs older than this many days. Default: 7
-.PARAMETER CreateRestorePoint  Create a System Restore point before cleaning (warns and continues if unavailable).
 .PARAMETER NoPause           Do not wait for Enter at the end.
 
 .EXAMPLE
@@ -44,7 +43,6 @@ param(
     [switch]$ConfirmDockerPrune,
     [switch]$Quarantine,
     [int]$QuarantineDays = 7,
-    [switch]$CreateRestorePoint,
     [switch]$NoPause
 )
 
