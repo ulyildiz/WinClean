@@ -13,6 +13,7 @@ function Invoke-DevCacheCleanup {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Target,
         [ValidateRange(0, 87600)][int]$AgeHours = 168,
+        [string]$QuarantinePath,
         [switch]$DryRun
     )
 
@@ -25,8 +26,8 @@ function Invoke-DevCacheCleanup {
                 New-TargetResult -Label $t.Label -Path $t.Path -Status 'Skipped' -Reason "used within the last $AgeHours h" -Category $category
                 continue
             }
-            $r = Clear-FolderContents -Path $t.Path -Label $t.Label -Category $category -DryRun:$DryRun
-            if (-not $DryRun -and $r.Status -eq 'Cleaned') {
+            $r = Clear-FolderContents -Path $t.Path -Label $t.Label -Category $category -QuarantinePath $QuarantinePath -DryRun:$DryRun
+            if (-not $DryRun -and ($r.Status -eq 'Cleaned' -or $r.Status -eq 'Quarantined')) {
                 try { [IO.Directory]::Delete($t.Path, $false) } catch { }   # only succeeds when empty
             }
             $r
@@ -46,11 +47,11 @@ function Invoke-DevCacheCleanup {
                 New-TargetResult -Label $t.Label -Path $t.Path -Status 'Skipped' -Reason $why -Category $category
                 continue
             }
-            Clear-FolderContents -Path $t.Path -Label $t.Label -AgeHours $AgeHours -Category $category
+            Clear-FolderContents -Path $t.Path -Label $t.Label -AgeHours $AgeHours -Category $category -QuarantinePath $QuarantinePath
             [void](Invoke-ExternalCommand -FilePath $npm -ArgumentList @('cache', 'verify') -TimeoutSeconds 600)
             continue
         }
 
-        Clear-FolderContents -Path $t.Path -Label $t.Label -AgeHours $AgeHours -Category $category -DryRun:$DryRun
+        Clear-FolderContents -Path $t.Path -Label $t.Label -AgeHours $AgeHours -Category $category -QuarantinePath $QuarantinePath -DryRun:$DryRun
     }
 }

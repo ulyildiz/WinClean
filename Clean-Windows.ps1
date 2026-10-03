@@ -18,6 +18,8 @@
 .PARAMETER DevAgeHours       Keep developer data written within this many hours. Default: 168
 .PARAMETER GitGc             Run 'git gc' in repositories under -DevRoot.
 .PARAMETER ConfirmDockerPrune  Remove dangling Docker images (never --all).
+.PARAMETER Quarantine        Move files to %TEMP%\WinClean-Quarantine instead of deleting them.
+.PARAMETER QuarantineDays    Delete quarantine runs older than this many days. Default: 7
 .PARAMETER NoPause           Do not wait for Enter at the end.
 
 .EXAMPLE
@@ -39,6 +41,8 @@ param(
     [int]$DevAgeHours = 168,
     [switch]$GitGc,
     [switch]$ConfirmDockerPrune,
+    [switch]$Quarantine,
+    [int]$QuarantineDays = 7,
     [switch]$NoPause
 )
 

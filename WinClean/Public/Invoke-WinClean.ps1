@@ -79,6 +79,16 @@ function Invoke-WinClean {
     .PARAMETER SkipRam
         Do not flush the RAM cache.
 
+    .PARAMETER Quarantine
+        Move files to %TEMP%\WinClean-Quarantine\<yyyyMMdd-HHmmss>\ instead of deleting
+        them. Original paths are mirrored inside (C:\a\b.tmp -> <run>\C\a\b.tmp), so
+        anything can be moved back by hand. Space is only freed when the run is purged.
+        Docker prune is skipped, because images cannot be quarantined.
+
+    .PARAMETER QuarantineDays
+        Quarantine runs older than this many days are deleted permanently at the start
+        of every run (dry runs only report them). Default: 7
+
     .PARAMETER PassThru
         Return a WinClean.RunResult object with per-target details.
 
@@ -135,6 +145,11 @@ function Invoke-WinClean {
         [switch]$GitGc,
         [switch]$ConfirmDockerPrune,
 
+        [switch]$Quarantine,
+
+        [ValidateRange(0, 3650)]
+        [int]$QuarantineDays = 7,
+
         [switch]$PassThru
     )
 
@@ -147,13 +162,28 @@ function Invoke-WinClean {
     $results = New-Object 'System.Collections.Generic.List[object]'
     $ram = $null
     $wsl = $null
+    $quarantineRun = $null
 
     Write-Host ''
     if ($DryRun) { Write-Host '=== Windows cleanup (DRY RUN - nothing will be deleted) ===' -ForegroundColor Yellow }
+    elseif ($Quarantine) { Write-Host '=== Windows cleanup (QUARANTINE - files are moved, not deleted) ===' -ForegroundColor Green }
     else         { Write-Host '=== Windows cleanup ===' -ForegroundColor Green }
 
     if ($limited) {
         Write-Warning 'Not running as administrator: Windows temp, error reports, the Update cache and the RAM flush will be skipped. Run from an elevated PowerShell for a full clean.'
+    }
+
+    # expired quarantine runs are purged on every run, before a new one is started
+    $purged = @(Invoke-QuarantinePurge -Days $QuarantineDays -DryRun:$DryRun)
+    if ($purged.Count -gt 0) {
+        Write-Host ''
+        Write-Host ("Quarantine older than {0} day(s)" -f $QuarantineDays) -ForegroundColor Cyan
+        foreach ($r in $purged) { $results.Add($r); Write-TargetResult -Result $r }
+    }
+    if ($Quarantine -and -not $DryRun) {
+        $quarantineRun = New-QuarantineRun
+        Write-Host ''
+        Write-Host "Quarantine folder: $quarantineRun (purged after $QuarantineDays day(s))"
     }
 
     Write-Host ''
@@ -171,7 +201,7 @@ function Invoke-WinClean {
             # ageHours null in the config = follow -MinAgeHours
             $age = $MinAgeHours
             if ($null -ne $t.AgeHours) { $age = $t.AgeHours }
-            $r = Clear-FolderContents -Path $t.ExpandedPath -Label $t.Label -AgeHours $age -Category $t.Category -DryRun:$DryRun
+            $r = Clear-FolderContents -Path $t.ExpandedPath -Label $t.Label -AgeHours $age -Category $t.Category -QuarantinePath $quarantineRun -DryRun:$DryRun
         }
         $results.Add($r)
         Write-TargetResult -Result $r
@@ -181,7 +211,7 @@ function Invoke-WinClean {
         Write-Host ''
         Write-Host 'Browser caches (close browsers first for best results)' -ForegroundColor Cyan
         foreach ($b in (Get-BrowserCachePaths)) {
-            $r = Clear-FolderContents -Path $b.Path -Label $b.Label -Category 'browser' -DryRun:$DryRun
+            $r = Clear-FolderContents -Path $b.Path -Label $b.Label -Category 'browser' -QuarantinePath $quarantineRun -DryRun:$DryRun
             $results.Add($r)
             Write-TargetResult -Result $r
         }
@@ -194,7 +224,7 @@ function Invoke-WinClean {
             $r = New-TargetResult -Label 'Windows Update downloads' -Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download') -Status 'Skipped' -Reason 'requires administrator' -Category 'update'
         }
         else {
-            $r = Clear-UpdateCache -DryRun:$DryRun
+            $r = Clear-UpdateCache -QuarantinePath $quarantineRun -DryRun:$DryRun
         }
         $results.Add($r)
         Write-TargetResult -Result $r
@@ -203,7 +233,7 @@ function Invoke-WinClean {
     if ($IncludeDev) {
         Write-Host ''
         Write-Host 'Developer caches (close editors / package managers first for best results)' -ForegroundColor Cyan
-        foreach ($r in (Invoke-DevCacheCleanup -Target @(Get-DevCacheTargets) -AgeHours $DevAgeHours -DryRun:$DryRun)) {
+        foreach ($r in (Invoke-DevCacheCleanup -Target @(Get-DevCacheTargets) -AgeHours $DevAgeHours -QuarantinePath $quarantineRun -DryRun:$DryRun)) {
             $results.Add($r)
             Write-TargetResult -Result $r
         }
@@ -211,7 +241,7 @@ function Invoke-WinClean {
         Write-Host ''
         Write-Host 'Build artifacts' -ForegroundColor Cyan
         if ($DevRoot) {
-            foreach ($r in (Invoke-DevArtifactCleanup -Root $DevRoot -AgeHours $DevAgeHours -DryRun:$DryRun)) {
+            foreach ($r in (Invoke-DevArtifactCleanup -Root $DevRoot -AgeHours $DevAgeHours -QuarantinePath $quarantineRun -DryRun:$DryRun)) {
                 $results.Add($r)
                 Write-TargetResult -Result $r
             }
@@ -238,7 +268,12 @@ function Invoke-WinClean {
     if ($IncludeDev -or $ConfirmDockerPrune) {
         Write-Host ''
         Write-Host 'Docker / WSL' -ForegroundColor Cyan
-        foreach ($r in (Invoke-DockerMaintenance -Prune:$ConfirmDockerPrune -DryRun:$DryRun)) {
+        # a pruned image cannot be moved to quarantine, so -Quarantine downgrades prune to a report
+        $prune = $ConfirmDockerPrune -and -not $Quarantine
+        if ($ConfirmDockerPrune -and $Quarantine) {
+            Write-Host '  docker prune skipped: images cannot be quarantined (run without -Quarantine to prune)' -ForegroundColor Yellow
+        }
+        foreach ($r in (Invoke-DockerMaintenance -Prune:$prune -DryRun:$DryRun)) {
             $results.Add($r)
             Write-TargetResult -Result $r
         }
@@ -280,31 +315,50 @@ function Invoke-WinClean {
 
     $totalBytes = 0L
     $totalFiles = 0
+    $quarantinedBytes = 0L
+    $quarantinedFiles = 0
     foreach ($r in $results) {
+        if ($r.Status -eq 'Quarantined') { $quarantinedBytes += $r.Bytes; $quarantinedFiles += $r.Files; continue }
         if ($r.Status -ne 'Cleaned' -and $r.Status -ne 'WouldClean') { continue }   # Info lines are reports, not savings
         $totalBytes += $r.Bytes
         $totalFiles += $r.Files
     }
 
+    # a quarantine run that received nothing is not worth keeping
+    if ($quarantineRun -and $quarantinedFiles -eq 0) {
+        try { [IO.Directory]::Delete($quarantineRun, $false) } catch { }
+    }
+
     Write-Host ''
     $verb = 'Freed'
     if ($DryRun) { $verb = 'Would free' }
-    Write-Host ('{0}: {1} in {2} files' -f $verb, (Format-Size $totalBytes), $totalFiles) -ForegroundColor Green
+    if ($Quarantine -and $DryRun) { $verb = 'Would quarantine' }
+    if ($quarantineRun) {
+        Write-Host ('Quarantined: {0} in {1} files -> {2}' -f (Format-Size $quarantinedBytes), $quarantinedFiles, $quarantineRun) -ForegroundColor Green
+        if ($totalFiles -gt 0) { Write-Host ('Freed (expired quarantine): {0} in {1} files' -f (Format-Size $totalBytes), $totalFiles) -ForegroundColor Green }
+    }
+    else {
+        Write-Host ('{0}: {1} in {2} files' -f $verb, (Format-Size $totalBytes), $totalFiles) -ForegroundColor Green
+    }
     Write-Host ''
 
     if ($PassThru) {
         [pscustomobject]@{
-            PSTypeName   = 'WinClean.RunResult'
-            StartTime    = $startTime
-            EndTime      = Get-Date
-            DryRun       = [bool]$DryRun
-            IsAdmin      = $isAdmin
-            ConfigPath   = $config.UserPath
-            BytesFreed   = $totalBytes
-            FilesRemoved = $totalFiles
-            Targets      = $results.ToArray()
-            Ram          = $ram
-            Wsl          = $wsl
+            PSTypeName       = 'WinClean.RunResult'
+            StartTime        = $startTime
+            EndTime          = Get-Date
+            DryRun           = [bool]$DryRun
+            IsAdmin          = $isAdmin
+            ConfigPath       = $config.UserPath
+            BytesFreed       = $totalBytes
+            FilesRemoved     = $totalFiles
+            Quarantine       = [bool]$Quarantine
+            QuarantinePath   = $quarantineRun
+            BytesQuarantined = $quarantinedBytes
+            FilesQuarantined = $quarantinedFiles
+            Targets          = $results.ToArray()
+            Ram              = $ram
+            Wsl              = $wsl
         }
     }
 }

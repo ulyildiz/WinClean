@@ -6,6 +6,8 @@ function Clear-FolderContents {
         The folder must pass Test-PathSafety first. Junctions and symlinks are never followed,
         files newer than -AgeHours are kept, and locked / in-use files are silently skipped.
         Emptied sub-folders are removed afterwards with a non-recursive delete.
+        With -QuarantinePath files are moved into that quarantine run instead of deleted.
+        The quarantine folder itself is never entered, so cleaning %TEMP% cannot empty it.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -21,6 +23,8 @@ function Clear-FolderContents {
         [int]$AgeHours = 0,
 
         [string]$Category,
+
+        [string]$QuarantinePath,
 
         [switch]$DryRun
     )
@@ -41,6 +45,7 @@ function Clear-FolderContents {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return $result }
 
     $ignoreCase = [StringComparison]::OrdinalIgnoreCase
+    $neverEnter = @($script:ModuleRoot.TrimEnd('\'), (Get-QuarantineRoot).TrimEnd('\'))
     $cutoff = (Get-Date).AddHours(-$AgeHours)
     $freed = 0L
     $count = 0
@@ -57,8 +62,9 @@ function Clear-FolderContents {
             # never follow junctions / symlinks
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
             if ($item.PSIsContainer) {
-                # never descend into WinClean's own install folder
-                if ([string]::Equals($item.FullName.TrimEnd('\'), $script:ModuleRoot.TrimEnd('\'), $ignoreCase)) { continue }
+                # never descend into WinClean's own install folder or the quarantine
+                $full = $item.FullName.TrimEnd('\')
+                if (@($neverEnter | Where-Object { [string]::Equals($full, $_, $ignoreCase) }).Count -gt 0) { continue }
                 $stack.Push($item.FullName)
                 continue
             }
@@ -66,6 +72,10 @@ function Clear-FolderContents {
 
             $size = $item.Length
             if ($DryRun) { $freed += $size; $count++; continue }
+            if ($QuarantinePath) {
+                if (Move-ToQuarantine -Source $item.FullName -QuarantinePath $QuarantinePath) { $freed += $size; $count++ }
+                continue
+            }
             try {
                 Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
                 $freed += $size
@@ -88,7 +98,9 @@ function Clear-FolderContents {
         }
     }
 
-    if ($DryRun) { $result.Status = 'WouldClean' } else { $result.Status = 'Cleaned' }
+    if ($DryRun) { $result.Status = 'WouldClean' }
+    elseif ($QuarantinePath) { $result.Status = 'Quarantined' }
+    else { $result.Status = 'Cleaned' }
     $result.Bytes = $freed
     $result.Files = $count
     return $result

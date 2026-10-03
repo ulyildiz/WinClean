@@ -12,6 +12,7 @@ function Invoke-DevArtifactCleanup {
     param(
         [Parameter(Mandatory)][string[]]$Root,
         [ValidateRange(0, 87600)][int]$AgeHours = 168,
+        [string]$QuarantinePath,
         [switch]$DryRun
     )
 
@@ -44,7 +45,7 @@ function Invoke-DevArtifactCleanup {
                 New-TargetResult -Label $itemLabel -Path $a.Path -Status 'Skipped' -Reason "built within the last $AgeHours h" -Category 'dev-artifact'
                 continue
             }
-            Clear-FolderContents -Path $a.Path -Label $itemLabel -Category 'dev-artifact' -DryRun:$DryRun
+            Clear-FolderContents -Path $a.Path -Label $itemLabel -Category 'dev-artifact' -QuarantinePath $QuarantinePath -DryRun:$DryRun
         }
     }
 }

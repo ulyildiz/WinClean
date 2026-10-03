@@ -5,7 +5,10 @@ function Clear-UpdateCache {
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param([switch]$DryRun)
+    param(
+        [string]$QuarantinePath,
+        [switch]$DryRun
+    )
 
     $label = 'Windows Update downloads'
     $path  = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
@@ -24,7 +27,7 @@ function Clear-UpdateCache {
         if (-not $DryRun) {
             foreach ($n in $running) { Stop-Service -Name $n -Force -ErrorAction SilentlyContinue }
         }
-        Clear-FolderContents -Path $path -Label $label -Category 'update' -DryRun:$DryRun
+        Clear-FolderContents -Path $path -Label $label -Category 'update' -QuarantinePath $QuarantinePath -DryRun:$DryRun
     }
     finally {
         # put services back exactly as they were
