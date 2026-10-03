@@ -45,7 +45,10 @@ function Clear-FolderContents {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { return $result }
 
     $ignoreCase = [StringComparison]::OrdinalIgnoreCase
-    $neverEnter = @($script:ModuleRoot.TrimEnd('\'), (Get-QuarantineRoot).TrimEnd('\'))
+    # compared against long-name paths from the traversal, so expand 8.3 names first
+    $moduleRoot = $script:ModuleRoot
+    try { $moduleRoot = ConvertTo-NormalizedPath -Path $moduleRoot } catch { }
+    $neverEnter = @($moduleRoot.TrimEnd('\'), (Get-QuarantineRoot).TrimEnd('\'))
     $cutoff = (Get-Date).AddHours(-$AgeHours)
     $freed = 0L
     $count = 0

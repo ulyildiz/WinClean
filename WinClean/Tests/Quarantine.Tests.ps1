@@ -79,6 +79,35 @@ Describe 'Quarantine' {
         }
     }
 
+    Context '8.3 short-name paths' {
+        BeforeEach {
+            $script:base = Join-Path $TestDrive ('sn-' + [guid]::NewGuid().Guid.Substring(0, 8))
+            $script:longDir = Join-Path $base 'Short Name Root'
+            [void][IO.Directory]::CreateDirectory($longDir)
+            $script:shortDir = (cmd /c "for %A in (`"$longDir`") do @echo %~sA").Trim()
+        }
+
+        It 'creates a run below a quarantine root that contains an 8.3 short name' {
+            if ($shortDir -notmatch '~\d') { Set-ItResult -Skipped -Because '8.3 name generation is disabled on this volume'; return }
+            Mock -ModuleName WinClean Get-QuarantineRoot { Join-Path $shortDir 'WinClean-Quarantine' }
+            $run = Invoke-InModule { New-QuarantineRun }
+            Test-Path -LiteralPath $run -PathType Container | Should -BeTrue
+        }
+
+        It 'never enters the module folder even when the module was loaded through an 8.3 path' {
+            if ($shortDir -notmatch '~\d') { Set-ItResult -Skipped -Because '8.3 name generation is disabled on this volume'; return }
+            New-File "$longDir\module-file.ps1"
+            New-File "$base\other.tmp"
+            Invoke-InModule {
+                $saved = $script:ModuleRoot
+                $script:ModuleRoot = $S
+                try { Clear-FolderContents -Path $T -Label 't' | Out-Null } finally { $script:ModuleRoot = $saved }
+            } @{ S = $shortDir; T = $base }
+            Test-Path -LiteralPath "$base\other.tmp" | Should -BeFalse -Because 'the rest of the folder is cleaned'
+            Test-Path -LiteralPath "$longDir\module-file.ps1" | Should -BeTrue -Because 'the module folder is never entered'
+        }
+    }
+
     Context 'New-QuarantineRun' {
         It 'names runs by timestamp and never reuses a folder' {
             $now = [datetime]'2026-10-03 14:05:09'

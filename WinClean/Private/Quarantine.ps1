@@ -25,7 +25,9 @@ function New-QuarantineRun {
     $path = Join-Path $base $name
     $i = 1
     while (Test-Path -LiteralPath $path) { $path = Join-Path $base ('{0}-{1}' -f $name, $i); $i++ }
-    New-Item -ItemType Directory -Path $path -Force | Out-Null
+    # not New-Item -Force: in Windows PowerShell 5.1 it fails to create nested folders below
+    # a path that contains an 8.3 short name (e.g. C:\Users\RUNNER~1\...)
+    [void][IO.Directory]::CreateDirectory($path)
     return $path
 }
 

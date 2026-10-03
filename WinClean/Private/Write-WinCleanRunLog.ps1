@@ -50,7 +50,7 @@ function Write-WinCleanRunLog {
         if (-not $owned) { throw 'the run log is locked by another WinClean run' }
 
         $dir = Split-Path -Path $Path -Parent
-        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [void][IO.Directory]::CreateDirectory($dir)   # also safe below 8.3 short-name paths
 
         $entries = @()
         if (Test-Path -LiteralPath $Path -PathType Leaf) {
