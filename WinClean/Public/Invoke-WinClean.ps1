@@ -25,6 +25,12 @@ function Invoke-WinClean {
         An invalid entry or an undefined variable skips that target; an unreadable
         config file stops the run before anything is deleted.
 
+    .PARAMETER ConfigPath
+        A user config file in the same format. By default it extends the built-in
+        targets: an entry with the same label as a built-in one replaces it (e.g. to
+        change ageHours or set "enabled": false) and new labels are added. Put
+        "extendDefaults": false at the top level to use only the user file's targets.
+
         Without administrator rights a real run skips the targets that need
         elevation (Windows temp, error reports, Update cache, RAM flush) instead
         of failing on them. -DryRun works without elevation.
@@ -55,6 +61,17 @@ function Invoke-WinClean {
         Invoke-WinClean -SkipBrowsers -MinAgeHours 6
 
     .EXAMPLE
+        Invoke-WinClean -DryRun -ConfigPath .\my-targets.json
+
+        my-targets.json:
+        {
+          "targets": [
+            { "label": "User temp", "path": "%TEMP%", "ageHours": 48, "category": "temp" },
+            { "label": "Gradle build cache", "path": "%USERPROFILE%\\.gradle\\caches\\build-cache-1", "ageHours": 168, "category": "cache" }
+          ]
+        }
+
+    .EXAMPLE
         $run = Invoke-WinClean -DryRun -SkipRam -PassThru
         $run.Targets | Sort-Object Bytes -Descending | Format-Table Label, Bytes, Files
     #>
@@ -69,11 +86,15 @@ function Invoke-WinClean {
         [switch]$SkipBrowsers,
         [switch]$SkipUpdateCache,
         [switch]$SkipRam,
+
+        [ValidateNotNullOrEmpty()]
+        [string]$ConfigPath,
+
         [switch]$PassThru
     )
 
     # load before printing anything: a broken config stops the run before any deletion
-    $config = Get-WinCleanConfig
+    $config = Get-WinCleanConfig -ConfigPath $ConfigPath
 
     $startTime = Get-Date
     $isAdmin = Test-IsAdministrator
@@ -177,6 +198,7 @@ function Invoke-WinClean {
             EndTime      = Get-Date
             DryRun       = [bool]$DryRun
             IsAdmin      = $isAdmin
+            ConfigPath   = $config.UserPath
             BytesFreed   = $totalBytes
             FilesRemoved = $totalFiles
             Targets      = $results.ToArray()

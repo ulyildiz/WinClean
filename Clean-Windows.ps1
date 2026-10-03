@@ -12,12 +12,14 @@
 .PARAMETER SkipBrowsers      Do not clean browser caches.
 .PARAMETER SkipUpdateCache   Do not clean the Windows Update download cache.
 .PARAMETER SkipRam           Do not flush the RAM cache.
+.PARAMETER ConfigPath        User config file that extends / overrides the default targets.
 .PARAMETER NoPause           Do not wait for Enter at the end.
 
 .EXAMPLE
     .\Clean-Windows.ps1 -DryRun
     .\Clean-Windows.ps1
     .\Clean-Windows.ps1 -SkipBrowsers -MinAgeHours 6
+    .\Clean-Windows.ps1 -DryRun -ConfigPath .\my-targets.json
 #>
 [CmdletBinding()]
 param(
@@ -26,10 +28,19 @@ param(
     [switch]$SkipBrowsers,
     [switch]$SkipUpdateCache,
     [switch]$SkipRam,
+    [string]$ConfigPath,
     [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Continue'
+
+# the elevated relaunch starts in System32, so relative config paths must be made absolute first
+if ($ConfigPath) {
+    $resolved = Resolve-Path -LiteralPath $ConfigPath -ErrorAction SilentlyContinue
+    if (-not $resolved) { Write-Error "Config file not found: $ConfigPath"; exit 1 }
+    $ConfigPath = $resolved.ProviderPath
+    $PSBoundParameters['ConfigPath'] = $ConfigPath
+}
 
 # ---------------------------------------------------------------- elevation
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -39,7 +50,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     foreach ($k in $PSBoundParameters.Keys) {
         $v = $PSBoundParameters[$k]
         if ($v -is [switch]) { if ($v.IsPresent) { $relaunch += "-$k" } }
-        else { $relaunch += "-$k"; $relaunch += "$v" }
+        else { $relaunch += "-$k"; $relaunch += ('"{0}"' -f $v) }
     }
     Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $relaunch
     exit

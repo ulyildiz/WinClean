@@ -123,18 +123,46 @@ function Read-WinCleanConfigFile {
 function Get-WinCleanConfig {
     <#
     .SYNOPSIS
-        Loads the cleanup targets from Config\winclean.config.json.
+        Loads the cleanup targets from Config\winclean.config.json, optionally merged with a user file.
+    .DESCRIPTION
+        With -ConfigPath, the user file extends the defaults: an entry whose label matches a
+        default entry (case-insensitive) replaces it in place - e.g. to change ageHours or to
+        set "enabled": false - and new labels are appended. A user file with
+        "extendDefaults": false replaces the default target list entirely.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param()
+    param([string]$ConfigPath)
 
     $defaultPath = Join-Path $script:ModuleRoot 'Config\winclean.config.json'
     $default = Read-WinCleanConfigFile -Path $defaultPath -Source 'default'
 
+    # ordered by label: replacing an existing key keeps its position
+    $merged = [ordered]@{}
+    foreach ($t in $default.Targets) { $merged[$t.Label.ToLowerInvariant()] = $t }
+
+    $userPath = $null
+    $extendDefaults = $true
+    if ($ConfigPath) {
+        if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "WinClean config file not found: $ConfigPath" }
+        $userPath = (Resolve-Path -LiteralPath $ConfigPath).ProviderPath
+        $user = Read-WinCleanConfigFile -Path $userPath -Source 'user'
+
+        $extend = $user.Json.PSObject.Properties['extendDefaults']
+        if ($extend -and $null -ne $extend.Value) {
+            if ($extend.Value -isnot [bool]) { throw "WinClean config 'extendDefaults' must be true or false: $userPath" }
+            $extendDefaults = $extend.Value
+        }
+        if (-not $extendDefaults) { $merged.Clear() }
+
+        foreach ($t in $user.Targets) { $merged[$t.Label.ToLowerInvariant()] = $t }
+    }
+
     [pscustomobject]@{
-        PSTypeName  = 'WinClean.Config'
-        DefaultPath = $defaultPath
-        Targets     = $default.Targets
+        PSTypeName     = 'WinClean.Config'
+        DefaultPath    = $defaultPath
+        UserPath       = $userPath
+        ExtendDefaults = $extendDefaults
+        Targets        = @($merged.Values)
     }
 }

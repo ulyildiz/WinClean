@@ -197,3 +197,124 @@ Describe 'Default config (Config\winclean.config.json)' {
         $verdict.IsSafe | Should -BeTrue
     }
 }
+
+Describe 'Get-WinCleanConfig -ConfigPath' {
+    BeforeAll {
+        $script:defaultCount = @(Invoke-Private { (Get-WinCleanConfig).Targets }).Count
+        function Get-Merged([string]$File) { Invoke-Private { Get-WinCleanConfig -ConfigPath $F } @{ F = $File } }
+    }
+
+    It 'appends new targets after the defaults' {
+        $f = New-ConfigFile '{ "targets": [ { "label": "My cache", "path": "C:\\Cache\\mine", "category": "cache" } ] }'
+        $cfg = Get-Merged $f
+        $cfg.ExtendDefaults | Should -BeTrue
+        @($cfg.Targets).Count | Should -Be ($defaultCount + 1)
+        $cfg.Targets[-1].Label  | Should -Be 'My cache'
+        $cfg.Targets[-1].Source | Should -Be 'user'
+        $cfg.UserPath | Should -Be $f
+    }
+
+    It 'overrides a default target by label (case-insensitive) and keeps its position' {
+        $f = New-ConfigFile '{ "targets": [ { "label": "user TEMP", "path": "%TEMP%", "ageHours": 48, "category": "temp" } ] }'
+        $cfg = Get-Merged $f
+        @($cfg.Targets).Count | Should -Be $defaultCount
+        $cfg.Targets[0].AgeHours | Should -Be 48
+        $cfg.Targets[0].Source   | Should -Be 'user'
+    }
+
+    It 'can disable a default target' {
+        $f = New-ConfigFile '{ "targets": [ { "label": "App crash dumps", "path": "%LOCALAPPDATA%\\CrashDumps", "category": "crash", "enabled": false } ] }'
+        ((Get-Merged $f).Targets | Where-Object Label -eq 'App crash dumps').Enabled | Should -BeFalse
+    }
+
+    It 'replaces the defaults when extendDefaults is false' {
+        $f = New-ConfigFile '{ "extendDefaults": false, "targets": [ { "label": "Only", "path": "C:\\Cache\\only", "category": "cache" } ] }'
+        $cfg = Get-Merged $f
+        $cfg.ExtendDefaults | Should -BeFalse
+        $cfg.Targets.Label  | Should -Be 'Only'
+    }
+
+    It 'throws when extendDefaults is not a boolean' {
+        $f = New-ConfigFile '{ "extendDefaults": "no", "targets": [] }'
+        { Get-Merged $f } | Should -Throw '*extendDefaults*'
+    }
+
+    It 'throws when the user config file does not exist' {
+        { Get-Merged (Join-Path $TestDrive 'missing.json') } | Should -Throw '*not found*'
+    }
+
+    It 'resolves a relative -ConfigPath' {
+        $f = New-ConfigFile '{ "targets": [] }'
+        Push-Location (Split-Path $f -Parent)
+        try { (Get-Merged ('.\' + (Split-Path $f -Leaf))).UserPath | Should -Be $f }
+        finally { Pop-Location }
+    }
+}
+
+Describe 'Invoke-WinClean -ConfigPath' {
+    BeforeAll {
+        Mock -ModuleName WinClean Write-Host { }
+
+        function Invoke-DryRun([string]$File) {
+            Invoke-WinClean -DryRun -SkipBrowsers -SkipUpdateCache -SkipRam -PassThru -ConfigPath $File -WarningAction SilentlyContinue
+        }
+    }
+
+    BeforeEach {
+        $script:dir = Join-Path $TestDrive ([guid]::NewGuid().Guid)
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        foreach ($n in 'old1.tmp', 'old2.tmp', 'new.tmp') { Set-Content -LiteralPath (Join-Path $dir $n) -Value 'x' }
+        foreach ($n in 'old1.tmp', 'old2.tmp') { (Get-Item -LiteralPath (Join-Path $dir $n)).LastWriteTime = (Get-Date).AddDays(-3) }
+        $script:json = @{ extendDefaults = $false; targets = @(@{ label = 'Test target'; path = $dir; ageHours = 24; category = 'test' }) }
+    }
+
+    It 'dry-runs only the user targets, honours ageHours and deletes nothing' {
+        $run = Invoke-DryRun (New-ConfigFile $json)
+        @($run.Targets).Count     | Should -Be 1
+        $run.Targets[0].Status    | Should -Be 'WouldClean'
+        $run.Targets[0].Category  | Should -Be 'test'
+        $run.Targets[0].Files     | Should -Be 2
+        $run.ConfigPath           | Should -Not -BeNullOrEmpty
+        @(Get-ChildItem -LiteralPath $dir).Count | Should -Be 3
+    }
+
+    It 'falls back to -MinAgeHours when ageHours is null' {
+        $json.targets[0].ageHours = $null
+        $run = Invoke-WinClean -DryRun -SkipBrowsers -SkipUpdateCache -SkipRam -PassThru -MinAgeHours 0 -ConfigPath (New-ConfigFile $json)
+        $run.Targets[0].Files | Should -Be 3
+    }
+
+    It 'expands environment variables in user paths' {
+        $env:WINCLEAN_TEST_TARGET = $dir
+        try {
+            $json.targets[0].path = '%WINCLEAN_TEST_TARGET%'
+            (Invoke-DryRun (New-ConfigFile $json)).Targets[0].Path | Should -Be $dir
+        }
+        finally { Remove-Item Env:\WINCLEAN_TEST_TARGET }
+    }
+
+    It 'refuses a user target that points at a protected folder' {
+        $json.targets[0].path = '%USERPROFILE%\Documents'
+        $r = (Invoke-DryRun (New-ConfigFile $json)).Targets[0]
+        $r.Status | Should -Be 'Skipped'
+        $r.Reason | Should -Match 'Documents'
+    }
+
+    It 'skips (and never widens) a target with an undefined variable' {
+        $json.targets[0].path = 'C:\Data\%WINCLEAN_UNDEFINED%'
+        $r = (Invoke-DryRun (New-ConfigFile $json)).Targets[0]
+        $r.Status | Should -Be 'Skipped'
+        $r.Reason | Should -Match 'not defined'
+    }
+
+    It 'skips disabled targets entirely' {
+        $json.targets[0].enabled = $false
+        @((Invoke-DryRun (New-ConfigFile $json)).Targets).Count | Should -Be 0
+    }
+
+    It 'stops before touching any folder when the config file is broken' {
+        Mock -ModuleName WinClean Clear-FolderContents { }
+        { Invoke-WinClean -ConfigPath (New-ConfigFile '{ "targets": [ ') -SkipRam } | Should -Throw '*not valid JSON*'
+        Should -Invoke -ModuleName WinClean Clear-FolderContents -Times 0 -Exactly
+    }
+}
