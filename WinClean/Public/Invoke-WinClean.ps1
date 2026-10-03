@@ -53,6 +53,16 @@ function Invoke-WinClean {
     .PARAMETER DevAgeHours
         Developer data written within this many hours is kept. Default: 168 (7 days)
 
+    .PARAMETER GitGc
+        Run a plain 'git gc' (no --aggressive, no --prune=now) in every repository
+        under -DevRoot. Repositories with a git operation in progress are skipped.
+
+    .PARAMETER ConfirmDockerPrune
+        Remove dangling Docker images ('docker image prune --force', never --all).
+        Without it, -IncludeDev only reports them. Nothing runs unless the Docker
+        daemon responds within 15 seconds. -IncludeDev also reports the memory held
+        by the WSL 2 VM and how to reclaim it; WinClean never runs 'wsl --shutdown'.
+
     .PARAMETER DryRun
         Show what would be removed and how much space it would free. Deletes nothing.
 
@@ -93,6 +103,9 @@ function Invoke-WinClean {
         Invoke-WinClean -DryRun -IncludeDev -DevRoot "$env:USERPROFILE\source\repos"
 
     .EXAMPLE
+        Invoke-WinClean -IncludeDev -DevRoot D:\src -GitGc -ConfirmDockerPrune
+
+    .EXAMPLE
         $run = Invoke-WinClean -DryRun -SkipRam -PassThru
         $run.Targets | Sort-Object Bytes -Descending | Format-Table Label, Bytes, Files
     #>
@@ -119,6 +132,9 @@ function Invoke-WinClean {
         [ValidateRange(0, 87600)]
         [int]$DevAgeHours = 168,
 
+        [switch]$GitGc,
+        [switch]$ConfirmDockerPrune,
+
         [switch]$PassThru
     )
 
@@ -130,6 +146,7 @@ function Invoke-WinClean {
     $limited = (-not $DryRun) -and (-not $isAdmin)
     $results = New-Object 'System.Collections.Generic.List[object]'
     $ram = $null
+    $wsl = $null
 
     Write-Host ''
     if ($DryRun) { Write-Host '=== Windows cleanup (DRY RUN - nothing will be deleted) ===' -ForegroundColor Yellow }
@@ -204,6 +221,36 @@ function Invoke-WinClean {
         }
     }
 
+    if ($GitGc) {
+        Write-Host ''
+        Write-Host 'Git maintenance' -ForegroundColor Cyan
+        if ($DevRoot) {
+            foreach ($r in (Invoke-GitMaintenance -Root $DevRoot -DryRun:$DryRun)) {
+                $results.Add($r)
+                Write-TargetResult -Result $r
+            }
+        }
+        else {
+            Write-Host '  skipped (-GitGc needs -DevRoot <projects folder>)' -ForegroundColor Yellow
+        }
+    }
+
+    if ($IncludeDev -or $ConfirmDockerPrune) {
+        Write-Host ''
+        Write-Host 'Docker / WSL' -ForegroundColor Cyan
+        foreach ($r in (Invoke-DockerMaintenance -Prune:$ConfirmDockerPrune -DryRun:$DryRun)) {
+            $results.Add($r)
+            Write-TargetResult -Result $r
+        }
+        if ($IncludeDev) {
+            $wsl = Get-WslMemoryReport
+            if ($wsl.Running) {
+                Write-Host ('  {0,-34} {1}' -f 'WSL VM memory', ('{0} held by {1}' -f (Format-Size $wsl.Bytes), $wsl.Process)) -ForegroundColor Gray
+                foreach ($s in $wsl.Steps) { Write-Host "    - $s" -ForegroundColor Gray }
+            }
+        }
+    }
+
     if (-not $DryRun) {
         & ipconfig.exe /flushdns | Out-Null
         if ($LASTEXITCODE -eq 0) {
@@ -233,7 +280,11 @@ function Invoke-WinClean {
 
     $totalBytes = 0L
     $totalFiles = 0
-    foreach ($r in $results) { $totalBytes += $r.Bytes; $totalFiles += $r.Files }
+    foreach ($r in $results) {
+        if ($r.Status -ne 'Cleaned' -and $r.Status -ne 'WouldClean') { continue }   # Info lines are reports, not savings
+        $totalBytes += $r.Bytes
+        $totalFiles += $r.Files
+    }
 
     Write-Host ''
     $verb = 'Freed'
@@ -253,6 +304,7 @@ function Invoke-WinClean {
             FilesRemoved = $totalFiles
             Targets      = $results.ToArray()
             Ram          = $ram
+            Wsl          = $wsl
         }
     }
 }

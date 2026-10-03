@@ -16,6 +16,8 @@
 .PARAMETER IncludeDev        Also clean developer caches and (with -DevRoot) stale build output.
 .PARAMETER DevRoot           Folder(s) to scan for projects.
 .PARAMETER DevAgeHours       Keep developer data written within this many hours. Default: 168
+.PARAMETER GitGc             Run 'git gc' in repositories under -DevRoot.
+.PARAMETER ConfirmDockerPrune  Remove dangling Docker images (never --all).
 .PARAMETER NoPause           Do not wait for Enter at the end.
 
 .EXAMPLE
@@ -35,6 +37,8 @@ param(
     [switch]$IncludeDev,
     [string[]]$DevRoot,
     [int]$DevAgeHours = 168,
+    [switch]$GitGc,
+    [switch]$ConfirmDockerPrune,
     [switch]$NoPause
 )
 
