@@ -81,7 +81,7 @@ BeforeDiscovery {
         @{ Name = 'dot segments';                      Path = $windows + '\.\System32\.' }
         @{ Name = 'trailing dot (Win32 strips it)';    Path = $documents + '.' }
         @{ Name = 'trailing space (Win32 strips it)';  Path = $documents + ' ' }
-        @{ Name = 'traversal from Temp to Documents';  Path = Join-Path $env:TEMP '..\..\..\Documents' }
+        @{ Name = 'traversal from Temp to Documents';  Path = Join-Path $userProfile 'AppData\Local\Temp\..\..\..\Documents' }
     )
 
     $script:invalid = @(

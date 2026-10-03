@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # PowerShell 7 support is declared in the manifest but has not been verified yet:
+    # report its results without failing the build until it is.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows PowerShell 5.1
+            shell: powershell
+            artifact: windows-powershell
+            experimental: false
+          - name: PowerShell 7 (experimental)
+            shell: pwsh
+            artifact: powershell-7
+            experimental: true
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Run Pester tests
+        shell: ${{ matrix.shell }}
+        run: ./Invoke-Tests.ps1 -Output Detailed -TestResultPath "testResults-${{ matrix.artifact }}.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.artifact }}
+          path: testResults-${{ matrix.artifact }}.xml
+          if-no-files-found: warn
