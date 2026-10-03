@@ -9,6 +9,9 @@ run-log.json
 # WinClean quarantine folders (-Quarantine)
 WinClean-Quarantine/
 
+# Local tooling (Pester saved by Invoke-Tests.ps1)
+.tools/
+
 # Pester / coverage output
 testResults.xml
 coverage.xml
