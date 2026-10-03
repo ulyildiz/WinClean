@@ -11,7 +11,7 @@ function Clear-UpdateCache {
     $path  = Join-Path $env:SystemRoot 'SoftwareDistribution\Download'
 
     if (Get-Process -Name 'TiWorker', 'TrustedInstaller' -ErrorAction SilentlyContinue) {
-        return New-TargetResult -Label $label -Path $path -Status 'Skipped' -Reason 'Windows Update is busy installing'
+        return New-TargetResult -Label $label -Path $path -Status 'Skipped' -Reason 'Windows Update is busy installing' -Category 'update'
     }
 
     $running = @()
@@ -24,7 +24,7 @@ function Clear-UpdateCache {
         if (-not $DryRun) {
             foreach ($n in $running) { Stop-Service -Name $n -Force -ErrorAction SilentlyContinue }
         }
-        Clear-FolderContents -Path $path -Label $label -DryRun:$DryRun
+        Clear-FolderContents -Path $path -Label $label -Category 'update' -DryRun:$DryRun
     }
     finally {
         # put services back exactly as they were

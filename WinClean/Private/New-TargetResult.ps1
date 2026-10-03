@@ -11,15 +11,19 @@ function New-TargetResult {
         [Parameter(Mandatory)][string]$Label,
         [AllowEmptyString()][string]$Path,
         [Parameter(Mandatory)][ValidateSet('Cleaned', 'WouldClean', 'Skipped', 'NotFound')][string]$Status,
-        [string]$Reason
+        [string]$Reason,
+        [string]$Category
     )
 
     $resultReason = $null
     if ($Reason) { $resultReason = $Reason }
+    $resultCategory = $null
+    if ($Category) { $resultCategory = $Category }
 
     [pscustomobject]@{
         PSTypeName = 'WinClean.TargetResult'
         Label      = $Label
+        Category   = $resultCategory
         Path       = $Path
         Status     = $Status
         Reason     = $resultReason

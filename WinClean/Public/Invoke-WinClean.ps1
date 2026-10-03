@@ -14,6 +14,17 @@ function Invoke-WinClean {
         Junctions and symlinks are skipped, never followed. Every target folder
         must pass Test-PathSafety before anything inside it is touched.
 
+        The temp / cache folders are listed in Config\winclean.config.json. Each
+        entry is an explicit allowlist item - there is no wildcard matching:
+            label          display name, unique per file (required)
+            path           folder; %VAR%, $env:VAR and ${env:VAR} are expanded (required)
+            category       lowercase tag, e.g. temp, cache, crash (required)
+            ageHours       keep files newer than this; null = use -MinAgeHours
+            requiresAdmin  skip on non-elevated real runs (default false)
+            enabled        false = ignore the entry (default true)
+        An invalid entry or an undefined variable skips that target; an unreadable
+        config file stops the run before anything is deleted.
+
         Without administrator rights a real run skips the targets that need
         elevation (Windows temp, error reports, Update cache, RAM flush) instead
         of failing on them. -DryRun works without elevation.
@@ -61,6 +72,9 @@ function Invoke-WinClean {
         [switch]$PassThru
     )
 
+    # load before printing anything: a broken config stops the run before any deletion
+    $config = Get-WinCleanConfig
+
     $startTime = Get-Date
     $isAdmin = Test-IsAdministrator
     $limited = (-not $DryRun) -and (-not $isAdmin)
@@ -78,21 +92,19 @@ function Invoke-WinClean {
     Write-Host ''
     Write-Host 'Temp files and caches' -ForegroundColor Cyan
 
-    $targets = @(
-        @{ Label = 'User temp';                Path = $env:TEMP;                                                          Age = $MinAgeHours; Admin = $false },
-        @{ Label = 'Windows temp';             Path = (Join-Path $env:SystemRoot 'Temp');                                 Age = $MinAgeHours; Admin = $true },
-        @{ Label = 'Internet cache';           Path = (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\INetCache');        Age = 0;            Admin = $false },
-        @{ Label = 'DirectX shader cache';     Path = (Join-Path $env:LOCALAPPDATA 'D3DSCache');                          Age = 0;            Admin = $false },
-        @{ Label = 'App crash dumps';          Path = (Join-Path $env:LOCALAPPDATA 'CrashDumps');                         Age = 0;            Admin = $false },
-        @{ Label = 'Error reporting queue';    Path = (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue');   Age = 0;            Admin = $true },
-        @{ Label = 'Error reporting archive';  Path = (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'); Age = 0;            Admin = $true }
-    )
-    foreach ($t in $targets) {
-        if ($t.Admin -and $limited) {
-            $r = New-TargetResult -Label $t.Label -Path $t.Path -Status 'Skipped' -Reason 'requires administrator'
+    foreach ($t in $config.Targets) {
+        if (-not $t.Enabled) { continue }
+        if ($t.Error) {
+            $r = New-TargetResult -Label $t.Label -Path $t.Path -Status 'Skipped' -Reason $t.Error -Category $t.Category
+        }
+        elseif ($t.RequiresAdmin -and $limited) {
+            $r = New-TargetResult -Label $t.Label -Path $t.ExpandedPath -Status 'Skipped' -Reason 'requires administrator' -Category $t.Category
         }
         else {
-            $r = Clear-FolderContents -Path $t.Path -Label $t.Label -AgeHours ([int]$t.Age) -DryRun:$DryRun
+            # ageHours null in the config = follow -MinAgeHours
+            $age = $MinAgeHours
+            if ($null -ne $t.AgeHours) { $age = $t.AgeHours }
+            $r = Clear-FolderContents -Path $t.ExpandedPath -Label $t.Label -AgeHours $age -Category $t.Category -DryRun:$DryRun
         }
         $results.Add($r)
         Write-TargetResult -Result $r
@@ -102,7 +114,7 @@ function Invoke-WinClean {
         Write-Host ''
         Write-Host 'Browser caches (close browsers first for best results)' -ForegroundColor Cyan
         foreach ($b in (Get-BrowserCachePaths)) {
-            $r = Clear-FolderContents -Path $b.Path -Label $b.Label -DryRun:$DryRun
+            $r = Clear-FolderContents -Path $b.Path -Label $b.Label -Category 'browser' -DryRun:$DryRun
             $results.Add($r)
             Write-TargetResult -Result $r
         }
@@ -112,7 +124,7 @@ function Invoke-WinClean {
         Write-Host ''
         Write-Host 'Windows Update cache' -ForegroundColor Cyan
         if ($limited) {
-            $r = New-TargetResult -Label 'Windows Update downloads' -Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download') -Status 'Skipped' -Reason 'requires administrator'
+            $r = New-TargetResult -Label 'Windows Update downloads' -Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download') -Status 'Skipped' -Reason 'requires administrator' -Category 'update'
         }
         else {
             $r = Clear-UpdateCache -DryRun:$DryRun

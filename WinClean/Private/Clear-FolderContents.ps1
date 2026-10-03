@@ -20,10 +20,12 @@ function Clear-FolderContents {
         [ValidateRange(0, [int]::MaxValue)]
         [int]$AgeHours = 0,
 
+        [string]$Category,
+
         [switch]$DryRun
     )
 
-    $result = New-TargetResult -Label $Label -Path $Path -Status 'NotFound'
+    $result = New-TargetResult -Label $Label -Path $Path -Status 'NotFound' -Category $Category
     if ([string]::IsNullOrWhiteSpace($Path)) { return $result }
 
     $verdict = Test-PathSafety -Path $Path -Detailed

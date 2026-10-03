@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "label": "User temp",
+      "path": "%TEMP%",
+      "ageHours": null,
+      "category": "temp"
+    },
+    {
+      "label": "Windows temp",
+      "path": "%SystemRoot%\\Temp",
+      "ageHours": null,
+      "category": "temp",
+      "requiresAdmin": true
+    },
+    {
+      "label": "Internet cache",
+      "path": "%LOCALAPPDATA%\\Microsoft\\Windows\\INetCache",
+      "ageHours": 0,
+      "category": "cache"
+    },
+    {
+      "label": "DirectX shader cache",
+      "path": "%LOCALAPPDATA%\\D3DSCache",
+      "ageHours": 0,
+      "category": "cache"
+    },
+    {
+      "label": "App crash dumps",
+      "path": "%LOCALAPPDATA%\\CrashDumps",
+      "ageHours": 0,
+      "category": "crash"
+    },
+    {
+      "label": "Error reporting queue",
+      "path": "%ProgramData%\\Microsoft\\Windows\\WER\\ReportQueue",
+      "ageHours": 0,
+      "category": "crash",
+      "requiresAdmin": true
+    },
+    {
+      "label": "Error reporting archive",
+      "path": "%ProgramData%\\Microsoft\\Windows\\WER\\ReportArchive",
+      "ageHours": 0,
+      "category": "crash",
+      "requiresAdmin": true
+    }
+  ]
+}
