@@ -19,6 +19,10 @@ BeforeAll {
     function Get-QuarantinedPath([string]$Run, [string]$Original) {
         Join-Path $Run ($Original.Substring(0, 1).ToUpperInvariant() + $Original.Substring(2))
     }
+
+    # mirrored paths can pass 260 characters, so read them through \\?\
+    function Test-Quarantined([string]$Run, [string]$Original) { [IO.File]::Exists('\\?\' + (Get-QuarantinedPath $Run $Original)) }
+    function Read-Quarantined([string]$Run, [string]$Original) { [IO.File]::ReadAllText('\\?\' + (Get-QuarantinedPath $Run $Original)).Trim() }
 }
 
 AfterAll {
@@ -38,6 +42,11 @@ Describe 'Quarantine' {
         New-File "$temp\sub\b.tmp"
     }
 
+    AfterEach {
+        # Pester's own TestDrive cleanup cannot delete >260-character paths in PS 5.1
+        if (Test-Path -LiteralPath $temp) { cmd /c "rd /s /q `"\\?\$temp`"" | Out-Null }
+    }
+
     Context 'Clear-FolderContents -QuarantinePath' {
         It 'moves files into the run, mirroring their original path' {
             $run = Invoke-InModule { New-QuarantineRun }
@@ -47,8 +56,8 @@ Describe 'Quarantine' {
             $r.Files  | Should -Be 2
             Test-Path "$temp\a.tmp"     | Should -BeFalse
             Test-Path "$temp\sub\b.tmp" | Should -BeFalse
-            Get-Content (Get-QuarantinedPath $run "$temp\a.tmp")     | Should -Be 'xxxx'
-            Get-Content (Get-QuarantinedPath $run "$temp\sub\b.tmp") | Should -Be 'xxxx'
+            Read-Quarantined $run "$temp\a.tmp"     | Should -Be 'xxxx'
+            Read-Quarantined $run "$temp\sub\b.tmp" | Should -Be 'xxxx'
         }
 
         It 'never enters the quarantine folder, so cleaning TEMP cannot empty it' {
@@ -67,7 +76,7 @@ Describe 'Quarantine' {
             finally { $stream.Dispose() }
             $r.Files | Should -Be 1
             Test-Path "$temp\a.tmp" | Should -BeTrue
-            Test-Path (Get-QuarantinedPath $run "$temp\a.tmp") | Should -BeFalse
+            Test-Quarantined $run "$temp\a.tmp" | Should -BeFalse
         }
 
         It '-DryRun moves nothing' {
@@ -76,6 +85,45 @@ Describe 'Quarantine' {
             $r.Status | Should -Be 'WouldClean'
             Test-Path "$temp\a.tmp" | Should -BeTrue
             @(Get-ChildItem -LiteralPath $run -Recurse -File).Count | Should -Be 0
+        }
+    }
+
+    Context 'Paths longer than 260 characters' {
+        It 'quarantines a file whose mirrored destination passes MAX_PATH' {
+            # npm's cache files have 128-character names; mirroring puts them far past 260
+            $name = ('a' * [Math]::Max(10, 230 - $temp.Length - 7)) + '.bin'
+            $source = Join-Path "$temp\npm" $name
+            New-File $source
+            $run = Invoke-InModule { New-QuarantineRun }
+            $destination = Get-QuarantinedPath $run $source
+            $destination.Length | Should -BeGreaterThan 260
+
+            $r = Invoke-InModule { Clear-FolderContents -Path $T -Label 'npm' -QuarantinePath $Q } @{ T = "$temp\npm"; Q = $run }
+            $r.Files | Should -Be 1
+            Test-Path -LiteralPath $source | Should -BeFalse
+            [IO.File]::Exists("\\?\$destination") | Should -BeTrue
+        }
+
+        It 'purges a run that contains paths longer than 260 characters' {
+            $run = "$qroot\20200101-000000"
+            $deep = $run + '\C\' + ('d' * 100) + '\' + ('e' * 100)
+            [void][IO.Directory]::CreateDirectory("\\?\$deep")
+            [IO.File]::WriteAllText("\\?\$deep\" + ('f' * 120) + '.bin', 'xyz')
+            $r = Invoke-InModule { Invoke-QuarantinePurge -Days 7 }
+            $r.Status | Should -Be 'Cleaned'
+            $r.Files  | Should -Be 1
+            [IO.Directory]::Exists("\\?\$run") | Should -BeFalse
+        }
+
+        It 'measures long-path runs in a dry run without deleting them' {
+            $run = "$qroot\20200101-000000"
+            $deep = $run + '\C\' + ('d' * 150) + '\' + ('e' * 100)
+            [void][IO.Directory]::CreateDirectory("\\?\$deep")
+            [IO.File]::WriteAllText("\\?\$deep\x.bin", '12345')
+            $r = Invoke-InModule { Invoke-QuarantinePurge -Days 7 -DryRun }
+            $r.Status | Should -Be 'WouldClean'
+            $r.Files  | Should -Be 1
+            [IO.File]::Exists("\\?\$deep\x.bin") | Should -BeTrue
         }
     }
 
@@ -179,7 +227,7 @@ Describe 'Quarantine' {
             $run.FilesQuarantined | Should -Be 2
             $run.FilesRemoved     | Should -Be 0
             $run.QuarantinePath   | Should -BeLike "$qroot\*"
-            Test-Path (Get-QuarantinedPath $run.QuarantinePath "$temp\sub\b.tmp") | Should -BeTrue
+            Test-Quarantined $run.QuarantinePath "$temp\sub\b.tmp" | Should -BeTrue
             Test-Path "$temp\sub\b.tmp" | Should -BeFalse
         }
 

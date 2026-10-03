@@ -31,15 +31,85 @@ function New-QuarantineRun {
     return $path
 }
 
+function ConvertTo-ExtendedPath {
+    <#
+    .SYNOPSIS
+        Prefixes an absolute drive path with \\?\ so .NET bypasses the 260-character limit.
+        Only for paths that are already normalized: \\?\ turns off all path normalization.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path.StartsWith('\\?\')) { return $Path }
+    if ($Path -notmatch '^[A-Za-z]:\\') { throw "Not an absolute drive path: $Path" }
+    return '\\?\' + $Path
+}
+
+function Remove-QuarantineRun {
+    <#
+    .SYNOPSIS
+        Deletes one quarantine run folder, including paths longer than 260 characters.
+    .DESCRIPTION
+        Uses extended-length paths throughout, so files a normal traversal cannot even see in
+        Windows PowerShell 5.1 are purged too. Junctions / symlinks are never followed (one
+        inside a run means something else put it there; it is left, and so is the run).
+        Folders are removed non-recursively, deepest first. With -DryRun only measures.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$DryRun
+    )
+
+    $result = [pscustomobject]@{ Bytes = 0L; Files = 0; Complete = $true }
+    $root = ConvertTo-ExtendedPath -Path $Path.TrimEnd('\')
+    $dirs = New-Object 'System.Collections.Generic.List[string]'
+    $stack = New-Object 'System.Collections.Generic.Stack[string]'
+    $stack.Push($root)
+
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        $dirs.Add($dir)
+        try { $entries = @(([IO.DirectoryInfo]$dir).EnumerateFileSystemInfos()) }
+        catch { $result.Complete = $false; continue }
+        foreach ($e in $entries) {
+            if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { $result.Complete = $false; continue }
+            if ($e -is [IO.DirectoryInfo]) { $stack.Push($e.FullName); continue }
+            $size = $e.Length
+            if ($DryRun) { $result.Bytes += $size; $result.Files++; continue }
+            try {
+                if ($e.Attributes -band [IO.FileAttributes]::ReadOnly) { $e.Attributes = $e.Attributes -bxor [IO.FileAttributes]::ReadOnly }
+                $e.Delete()
+                $result.Bytes += $size
+                $result.Files++
+            }
+            catch { $result.Complete = $false }
+        }
+    }
+
+    if (-not $DryRun) {
+        foreach ($d in ($dirs | Sort-Object -Property { $_.Length } -Descending)) {
+            try { [IO.Directory]::Delete($d, $false) } catch { $result.Complete = $false }
+        }
+    }
+    return $result
+}
+
 function Move-ToQuarantine {
     <#
     .SYNOPSIS
         Moves one file into a quarantine run, mirroring its original path
         (C:\a\b.tmp -> <run>\C\a\b.tmp). Returns $true on success.
     .DESCRIPTION
-        Fails safe: a locked file, an over-long destination or any other error leaves the
-        original where it is. If a cross-volume move copied the file but could not delete
-        the source, the stray copy is removed so nothing is double counted.
+        Mirroring roughly doubles the path length, so a cache file with a long name (npm's
+        content files are 128 characters) easily passes the 260-character MAX_PATH limit at
+        the destination. Extended-length (\\?\) paths are used for the move so that still
+        works in Windows PowerShell 5.1 without any system setting.
+
+        Fails safe: a locked file or any other error leaves the original where it is. If a
+        cross-volume move copied the file but could not delete the source, the stray copy is
+        removed so nothing is double counted.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -49,7 +119,8 @@ function Move-ToQuarantine {
     )
 
     if ($Source -notmatch '^[A-Za-z]:\\') { return $false }
-    $destination = Join-Path $QuarantinePath ($Source.Substring(0, 1).ToUpperInvariant() + $Source.Substring(2))
+    $destination = ConvertTo-ExtendedPath -Path (Join-Path $QuarantinePath ($Source.Substring(0, 1).ToUpperInvariant() + $Source.Substring(2)))
+    $Source = ConvertTo-ExtendedPath -Path $Source
     try {
         $parent = [IO.Path]::GetDirectoryName($destination)
         if (-not [IO.Directory]::Exists($parent)) { [void][IO.Directory]::CreateDirectory($parent) }
@@ -96,10 +167,19 @@ function Invoke-QuarantinePurge {
         if ($stamp -gt $cutoff) { continue }
 
         $label = 'Quarantine from ' + $stamp.ToString('yyyy-MM-dd HH:mm')
-        $r = Clear-FolderContents -Path $dir.FullName -Label $label -Category 'quarantine' -DryRun:$DryRun
-        if (-not $DryRun -and $r.Status -eq 'Cleaned') {
-            try { [IO.Directory]::Delete($dir.FullName, $false) } catch { }   # only succeeds when empty
+        $verdict = Test-PathSafety -Path $dir.FullName -Detailed
+        if (-not $verdict.IsSafe) {
+            New-TargetResult -Label $label -Path $dir.FullName -Status 'Skipped' -Reason $verdict.Reason -Category 'quarantine'
+            continue
         }
+
+        $removed = Remove-QuarantineRun -Path $verdict.NormalizedPath -DryRun:$DryRun
+        $status = 'Cleaned'
+        if ($DryRun) { $status = 'WouldClean' }
+        $r = New-TargetResult -Label $label -Path $verdict.NormalizedPath -Status $status -Category 'quarantine'
+        $r.Bytes = $removed.Bytes
+        $r.Files = $removed.Files
+        if (-not $DryRun -and -not $removed.Complete) { $r.Reason = 'some files could not be removed; will retry next run' }
         $r
     }
 }
