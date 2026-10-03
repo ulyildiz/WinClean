@@ -144,7 +144,10 @@ function Get-WinCleanConfig {
     $userPath = $null
     $extendDefaults = $true
     if ($ConfigPath) {
-        if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "WinClean config file not found: $ConfigPath" }
+        if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+            $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigPath)
+            throw "WinClean config file not found: $full (see Config\my-targets.example.json for a starting point)"
+        }
         $userPath = (Resolve-Path -LiteralPath $ConfigPath).ProviderPath
         $user = Read-WinCleanConfigFile -Path $userPath -Source 'user'
 

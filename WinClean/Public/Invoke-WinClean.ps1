@@ -63,7 +63,7 @@ function Invoke-WinClean {
     .EXAMPLE
         Invoke-WinClean -DryRun -ConfigPath .\my-targets.json
 
-        my-targets.json:
+        Start from Config\my-targets.example.json. A minimal my-targets.json:
         {
           "targets": [
             { "label": "User temp", "path": "%TEMP%", "ageHours": 48, "category": "temp" },

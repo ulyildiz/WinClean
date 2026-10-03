@@ -243,6 +243,22 @@ Describe 'Get-WinCleanConfig -ConfigPath' {
         { Get-Merged (Join-Path $TestDrive 'missing.json') } | Should -Throw '*not found*'
     }
 
+    It 'reports the full path it looked for when the file is missing' {
+        Push-Location $TestDrive
+        try { { Get-Merged '.\nope.json' } | Should -Throw "*$(Join-Path $TestDrive 'nope.json')*" }
+        finally { Pop-Location }
+    }
+
+    It 'ships a valid example user config whose targets all pass Test-PathSafety' {
+        $cfg = Get-Merged (Join-Path $PSScriptRoot '..\Config\my-targets.example.json')
+        $user = @($cfg.Targets | Where-Object Source -eq 'user')
+        $user.Count | Should -Be 3
+        $user | Where-Object Error | Should -BeNullOrEmpty
+        foreach ($t in $user) {
+            Invoke-Private { Test-PathSafety -Path $P } @{ P = $t.ExpandedPath } | Should -BeTrue -Because $t.Label
+        }
+    }
+
     It 'resolves a relative -ConfigPath' {
         $f = New-ConfigFile '{ "targets": [] }'
         Push-Location (Split-Path $f -Parent)

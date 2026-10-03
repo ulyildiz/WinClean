@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "extendDefaults": true,
+  "targets": [
+    {
+      "label": "User temp",
+      "path": "%TEMP%",
+      "ageHours": 24,
+      "category": "temp"
+    },
+    {
+      "label": "Internet cache",
+      "path": "%LOCALAPPDATA%\\Microsoft\\Windows\\INetCache",
+      "ageHours": 0,
+      "category": "cache",
+      "enabled": false
+    },
+    {
+      "label": "Gradle build cache",
+      "path": "%USERPROFILE%\\.gradle\\caches\\build-cache-1",
+      "ageHours": 168,
+      "category": "cache"
+    }
+  ]
+}
