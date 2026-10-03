@@ -25,15 +25,28 @@ function Invoke-WinClean {
         An invalid entry or an undefined variable skips that target; an unreadable
         config file stops the run before anything is deleted.
 
+        Without administrator rights a real run skips the targets that need
+        elevation (Windows temp, error reports, Update cache, RAM flush) instead
+        of failing on them. -DryRun works without elevation.
+
     .PARAMETER ConfigPath
         A user config file in the same format. By default it extends the built-in
         targets: an entry with the same label as a built-in one replaces it (e.g. to
         change ageHours or set "enabled": false) and new labels are added. Put
         "extendDefaults": false at the top level to use only the user file's targets.
 
-        Without administrator rights a real run skips the targets that need
-        elevation (Windows temp, error reports, Update cache, RAM flush) instead
-        of failing on them. -DryRun works without elevation.
+    .PARAMETER IncludeDev
+        Also clean developer data. With -DevRoot this includes build output folders
+        (bin/obj next to a .NET project, CMake build/CMakeFiles, Cargo target, git-ignored
+        npm build), each only when its contents prove it is tool output, it holds no
+        git-tracked files, and nothing in it was written within -DevAgeHours.
+
+    .PARAMETER DevRoot
+        Folder(s) to search for projects, e.g. $env:USERPROFILE\source\repos. Projects
+        under Documents / Desktop / Downloads are still refused by Test-PathSafety.
+
+    .PARAMETER DevAgeHours
+        Developer data written within this many hours is kept. Default: 168 (7 days)
 
     .PARAMETER DryRun
         Show what would be removed and how much space it would free. Deletes nothing.
@@ -72,6 +85,9 @@ function Invoke-WinClean {
         }
 
     .EXAMPLE
+        Invoke-WinClean -DryRun -IncludeDev -DevRoot "$env:USERPROFILE\source\repos"
+
+    .EXAMPLE
         $run = Invoke-WinClean -DryRun -SkipRam -PassThru
         $run.Targets | Sort-Object Bytes -Descending | Format-Table Label, Bytes, Files
     #>
@@ -89,6 +105,14 @@ function Invoke-WinClean {
 
         [ValidateNotNullOrEmpty()]
         [string]$ConfigPath,
+
+        [switch]$IncludeDev,
+
+        [ValidateNotNullOrEmpty()]
+        [string[]]$DevRoot,
+
+        [ValidateRange(0, 87600)]
+        [int]$DevAgeHours = 168,
 
         [switch]$PassThru
     )
@@ -152,6 +176,20 @@ function Invoke-WinClean {
         }
         $results.Add($r)
         Write-TargetResult -Result $r
+    }
+
+    if ($IncludeDev) {
+        Write-Host ''
+        Write-Host 'Build artifacts' -ForegroundColor Cyan
+        if ($DevRoot) {
+            foreach ($r in (Invoke-DevArtifactCleanup -Root $DevRoot -AgeHours $DevAgeHours -DryRun:$DryRun)) {
+                $results.Add($r)
+                Write-TargetResult -Result $r
+            }
+        }
+        else {
+            Write-Host '  skipped (pass -DevRoot <projects folder> to scan for build output)' -ForegroundColor Yellow
+        }
     }
 
     if (-not $DryRun) {

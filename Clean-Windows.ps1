@@ -13,6 +13,9 @@
 .PARAMETER SkipUpdateCache   Do not clean the Windows Update download cache.
 .PARAMETER SkipRam           Do not flush the RAM cache.
 .PARAMETER ConfigPath        User config file that extends / overrides the default targets.
+.PARAMETER IncludeDev        Also clean developer caches and (with -DevRoot) stale build output.
+.PARAMETER DevRoot           Folder(s) to scan for projects.
+.PARAMETER DevAgeHours       Keep developer data written within this many hours. Default: 168
 .PARAMETER NoPause           Do not wait for Enter at the end.
 
 .EXAMPLE
@@ -29,30 +32,46 @@ param(
     [switch]$SkipUpdateCache,
     [switch]$SkipRam,
     [string]$ConfigPath,
+    [switch]$IncludeDev,
+    [string[]]$DevRoot,
+    [int]$DevAgeHours = 168,
     [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Continue'
 
-# the elevated relaunch starts in System32, so relative config paths must be made absolute first
+# the elevated relaunch starts in System32, so relative paths must be made absolute first
 if ($ConfigPath) {
     $resolved = Resolve-Path -LiteralPath $ConfigPath -ErrorAction SilentlyContinue
     if (-not $resolved) { Write-Error "Config file not found: $ConfigPath"; exit 1 }
     $ConfigPath = $resolved.ProviderPath
     $PSBoundParameters['ConfigPath'] = $ConfigPath
 }
+if ($DevRoot) {
+    $DevRoot = @($DevRoot | ForEach-Object { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($_) })
+    $PSBoundParameters['DevRoot'] = $DevRoot
+}
 
 # ---------------------------------------------------------------- elevation
+function ConvertTo-PSLiteral($Value) {
+    if ($Value -is [array]) { return (@($Value | ForEach-Object { ConvertTo-PSLiteral $_ }) -join ',') }
+    if ($Value -is [int])   { return [string]$Value }
+    return "'" + ([string]$Value).Replace("'", "''") + "'"
+}
+
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host 'Administrator rights are needed (Windows temp, update cache, RAM flush). Requesting elevation...'
-    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    # rebuild the call as a PowerShell command and pass it encoded: no command-line quoting
+    # pitfalls for paths with spaces, quotes or arrays such as -DevRoot a, b
+    $command = '& ' + (ConvertTo-PSLiteral $PSCommandPath)
     foreach ($k in $PSBoundParameters.Keys) {
         $v = $PSBoundParameters[$k]
-        if ($v -is [switch]) { if ($v.IsPresent) { $relaunch += "-$k" } }
-        else { $relaunch += "-$k"; $relaunch += ('"{0}"' -f $v) }
+        if ($v -is [switch]) { if ($v.IsPresent) { $command += " -$k" } }
+        else { $command += " -$k " + (ConvertTo-PSLiteral $v) }
     }
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $relaunch
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
     exit
 }
 
