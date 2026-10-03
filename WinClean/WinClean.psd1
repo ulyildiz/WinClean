@@ -8,7 +8,7 @@
     PowerShellVersion    = '5.1'
     CompatiblePSEditions = @('Desktop', 'Core')
 
-    FunctionsToExport    = @('Invoke-WinClean')
+    FunctionsToExport    = @('Invoke-WinClean', 'Get-WinCleanReport')
     CmdletsToExport      = @()
     VariablesToExport    = @()
     AliasesToExport      = @()
