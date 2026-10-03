@@ -6,6 +6,11 @@ obj/
 *.log
 run-log.json
 
+# Get-WinCleanReport output (machine-specific: computer name, startup programs)
+/report.json
+/report.csv
+/report.txt
+
 # WinClean quarantine folders (-Quarantine)
 WinClean-Quarantine/
 
