@@ -2,6 +2,8 @@
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\WinClean.psd1') -Force
+    # Invoke-WinClean logs every run; keep test runs out of the real %LOCALAPPDATA% log
+    Mock -ModuleName WinClean Get-RunLogPath { Join-Path $TestDrive 'run-log.json' }
 
     function Invoke-Private([scriptblock]$Script, [hashtable]$Parameters = @{}) {
         InModuleScope WinClean -ScriptBlock $Script -Parameters $Parameters

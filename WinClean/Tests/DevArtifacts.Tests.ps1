@@ -6,6 +6,8 @@ BeforeDiscovery {
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\WinClean.psd1') -Force
+    # Invoke-WinClean logs every run; keep test runs out of the real %LOCALAPPDATA% log
+    Mock -ModuleName WinClean Get-RunLogPath { Join-Path $TestDrive 'run-log.json' }
     $script:hasGit = [bool](Get-Command git.exe -ErrorAction SilentlyContinue)
 
     function New-File([string]$Path, [string]$Content = 'x', [int]$AgeDays = 30) {

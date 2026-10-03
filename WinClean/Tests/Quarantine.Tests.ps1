@@ -2,6 +2,8 @@
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\WinClean.psd1') -Force
+    # Invoke-WinClean logs every run; keep test runs out of the real %LOCALAPPDATA% log
+    Mock -ModuleName WinClean Get-RunLogPath { Join-Path $TestDrive 'run-log.json' }
 
     function New-File([string]$Path, [string]$Content = 'xxxx', [double]$AgeDays = 3) {
         New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null

@@ -89,6 +89,11 @@ function Invoke-WinClean {
         Quarantine runs older than this many days are deleted permanently at the start
         of every run (dry runs only report them). Default: 7
 
+    .PARAMETER NoLog
+        Do not append this run to %LOCALAPPDATA%\WinClean\run-log.json. The log is local
+        only (timestamp, bytesFreed, filesRemoved, dryRun, quarantine figures, skipped
+        targets, duration); it keeps the newest 500 runs and is never sent anywhere.
+
     .PARAMETER PassThru
         Return a WinClean.RunResult object with per-target details.
 
@@ -149,6 +154,8 @@ function Invoke-WinClean {
 
         [ValidateRange(0, 3650)]
         [int]$QuarantineDays = 7,
+
+        [switch]$NoLog,
 
         [switch]$PassThru
     )
@@ -342,23 +349,29 @@ function Invoke-WinClean {
     }
     Write-Host ''
 
-    if ($PassThru) {
-        [pscustomobject]@{
-            PSTypeName       = 'WinClean.RunResult'
-            StartTime        = $startTime
-            EndTime          = Get-Date
-            DryRun           = [bool]$DryRun
-            IsAdmin          = $isAdmin
-            ConfigPath       = $config.UserPath
-            BytesFreed       = $totalBytes
-            FilesRemoved     = $totalFiles
-            Quarantine       = [bool]$Quarantine
-            QuarantinePath   = $quarantineRun
-            BytesQuarantined = $quarantinedBytes
-            FilesQuarantined = $quarantinedFiles
-            Targets          = $results.ToArray()
-            Ram              = $ram
-            Wsl              = $wsl
-        }
+    $runResult = [pscustomobject]@{
+        PSTypeName       = 'WinClean.RunResult'
+        StartTime        = $startTime
+        EndTime          = Get-Date
+        DryRun           = [bool]$DryRun
+        IsAdmin          = $isAdmin
+        ConfigPath       = $config.UserPath
+        BytesFreed       = $totalBytes
+        FilesRemoved     = $totalFiles
+        Quarantine       = [bool]$Quarantine
+        QuarantinePath   = $quarantineRun
+        BytesQuarantined = $quarantinedBytes
+        FilesQuarantined = $quarantinedFiles
+        Targets          = $results.ToArray()
+        Ram              = $ram
+        Wsl              = $wsl
     }
+
+    # the cleanup already happened; a logging problem must never turn it into a failure
+    if (-not $NoLog) {
+        try { Write-WinCleanRunLog -Result $runResult }
+        catch { Write-Warning "The run log could not be written: $($_.Exception.Message)" }
+    }
+
+    if ($PassThru) { $runResult }
 }
