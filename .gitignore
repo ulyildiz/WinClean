@@ -1,0 +1,18 @@
+# Build artifacts
+bin/
+obj/
+
+# Logs
+*.log
+run-log.json
+
+# WinClean quarantine folders (-Quarantine)
+WinClean-Quarantine/
+
+# Pester / coverage output
+testResults.xml
+coverage.xml
+
+# OS clutter
+Thumbs.db
+desktop.ini
