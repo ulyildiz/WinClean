@@ -59,10 +59,19 @@ function Write-WinCleanRunLog {
                 $parsed = $null
                 $valid = $text.TrimStart().StartsWith('[')
                 if ($valid) {
-                    try { $parsed = $text | ConvertFrom-Json -ErrorAction Stop } catch { $valid = $false }
+                    # PowerShell 7 turns ISO date strings into DateTime objects, which would rewrite
+                    # earlier timestamps in the current time zone; 7.5+ can keep them as text
+                    $readParams = @{ ErrorAction = 'Stop' }
+                    if ((Get-Command -Name ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $readParams['DateKind'] = 'String' }
+                    try { $parsed = $text | ConvertFrom-Json @readParams } catch { $valid = $false }
                 }
                 if ($valid) {
                     $entries = @($parsed)
+                    # PowerShell 7.0 - 7.4: no -DateKind, so at least keep timestamp a string
+                    foreach ($e in $entries) {
+                        $ts = $e.PSObject.Properties['timestamp']
+                        if ($ts -and $ts.Value -is [datetime]) { $ts.Value = $ts.Value.ToString('o') }
+                    }
                 }
                 else {
                     $aside = Join-Path $dir ('run-log.corrupt-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))

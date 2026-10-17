@@ -16,9 +16,13 @@ BeforeAll {
         InModuleScope WinClean -Parameters @{ R = $Result; P = $Path; M = $Max } { Write-WinCleanRunLog -Result $R -Path $P -MaxEntries $M -WarningAction SilentlyContinue }
     }
 
+    # PowerShell 7 turns ISO date strings into DateTime objects; 7.5+ can keep them as text
+    $script:readParams = @{}
+    if ((Get-Command -Name ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $script:readParams['DateKind'] = 'String' }
+
     # always an array, even with a single entry: the leading comma stops PowerShell from
     # unrolling it (a lone PSCustomObject has no .Count in Windows PowerShell 5.1)
-    function Read-Log([string]$Path) { , @((Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)) }
+    function Read-Log([string]$Path) { , @((Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json @readParams)) }
 }
 
 AfterAll {
@@ -57,6 +61,17 @@ Describe 'Write-WinCleanRunLog' {
         $entries.Count | Should -Be 2
         $entries.bytesFreed | Should -Be @(1, 2)
         $entries[1].dryRun | Should -BeTrue
+    }
+
+    It 'keeps earlier timestamps exactly as written when appending' -Skip:($PSVersionTable.PSEdition -eq 'Core' -and -not (Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) {
+        # a different time zone than the machine's: PowerShell 7 would otherwise re-render it
+        New-Item -ItemType Directory -Path (Split-Path $log -Parent) -Force | Out-Null
+        $earlier = '2020-01-01T00:00:00.0000000+05:45'
+        Set-Content -LiteralPath $log -Value ('[ { "timestamp": "' + $earlier + '", "bytesFreed": 1 } ]')
+        Write-Log (New-RunResult) $log
+        # PS 5.1 writes '":  "' and PS 7 '": "', so allow any spacing after the colon
+        Get-Content -LiteralPath $log -Raw | Should -Match ('"timestamp":\s*"' + [regex]::Escape($earlier) + '"')
+        (Read-Log $log)[0].timestamp | Should -BeOfType [string]
     }
 
     It 'keeps only the newest -MaxEntries runs' {
