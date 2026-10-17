@@ -33,12 +33,16 @@ jobs:
             artifact: powershell-7
             experimental: true
 
+    # a step's own 'shell:' cannot use the matrix context; job-level defaults can
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
     steps:
       - name: Check out
         uses: actions/checkout@v7
 
       - name: Run Pester tests
-        shell: ${{ matrix.shell }}
         run: ./Invoke-Tests.ps1 -Output Detailed -TestResultPath "testResults-${{ matrix.artifact }}.xml"
 
       - name: Upload test results
